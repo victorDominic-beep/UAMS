@@ -1,0 +1,11 @@
+{
+  "title": "FUNAAB UAMS",
+  "description": "University Asset Management System for the Federal University of Agriculture, Abeokuta.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

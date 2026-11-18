@@ -1,0 +1,574 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AssetLifecycleStatus {
+  PENDING_INSCRIPTION
+  IN_STORE
+  IN_SERVICE
+  UNDER_MAINTENANCE
+  UNSERVICEABLE
+  UNDER_SURVEY
+  WRITTEN_OFF
+  DISPOSED
+}
+
+enum VoucherStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum TransferStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SurveyStatus {
+  DRAFT
+  UNDER_SURVEY
+  PENDING_APPROVAL
+  WRITTEN_OFF
+  REJECTED
+  DISPOSED
+}
+
+enum SurveyItemRating {
+  EXCELLENT
+  GOOD
+  FAIR
+  POOR
+  BEYOND_REPAIR
+}
+
+enum AuthorizationDecision {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum VerificationOutcome {
+  VERIFIED
+  LOCATION_VARIANCE
+  MISSING
+  DAMAGE_REPORTED
+  OTHER
+}
+
+enum AuditActionType {
+  CREATE
+  UPDATE
+  APPROVE
+  REJECT
+  TRANSFER
+  VERIFY
+  WRITE_OFF
+  DISPOSE
+  LOGIN
+  LOGOUT
+  ROLE_ASSIGN
+  ACCESS_CHANGE
+  OTHER
+}
+
+model Role {
+  id          String     @id @default(uuid()) @db.Uuid
+  name        String     @unique
+  description String?
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  userRoles   UserRole[]
+
+  @@index([name])
+}
+
+model Department {
+  id        String   @id @default(uuid()) @db.Uuid
+  code      String   @unique
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users                User[]
+  assets               Asset[]
+  srvVouchers          SRVVoucher[]      @relation("SrvDepartment")
+  sivSourceDepartments SIVVoucher[]      @relation("SivSourceDepartment")
+  sivTargetDepartments SIVVoucher[]      @relation("SivTargetDepartment")
+  custodyFromTransfers CustodyTransfer[] @relation("CustodyFromDepartment")
+  custodyToTransfers   CustodyTransfer[] @relation("CustodyToDepartment")
+
+  @@index([name])
+  @@index([isActive])
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  staffNumber  String   @unique
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  departmentId String?  @db.Uuid
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  department Department? @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  roles      UserRole[]
+
+  createdSrvVouchers  SRVVoucher[] @relation("SrvCreator")
+  approvedSrvVouchers SRVVoucher[] @relation("SrvApprover")
+  createdSivVouchers  SIVVoucher[] @relation("SivCreator")
+  approvedSivVouchers SIVVoucher[] @relation("SivApprover")
+  receiptConfirmedSiv SIVVoucher[] @relation("SivReceiptCustodian")
+
+  authoredTransfers        CustodyTransfer[]   @relation("TransferActor")
+  approvedTransfers        CustodyTransfer[]   @relation("TransferApprover")
+  maintenanceRecords       MaintenanceRecord[] @relation("MaintenanceRecorder")
+  capitalAdditions         CapitalAddition[]   @relation("CapitalAdditionRecorder")
+  capitalAdditionsApproved CapitalAddition[]   @relation("CapitalAdditionApprover")
+
+  insurancePoliciesCreated InsurancePolicy[]    @relation("InsuranceCreator")
+  depreciationBatches      DepreciationLedger[] @relation("DepreciationProcessor")
+  surveyDocketsCreated     SurveyDocket[]       @relation("SurveyCreator")
+  surveysAsDocketMember    SurveyItem[]         @relation("SurveyAssessor")
+
+  writeOffsAsBursar     WriteOffAuthorization[] @relation("BursarApprover")
+  writeOffsAsVC         WriteOffAuthorization[] @relation("ViceChancellorApprover")
+  disposalsCreated      DisposalRecord[]        @relation("DisposalRecorder")
+  verificationsRecorded PhysicalVerification[]  @relation("PhysicalVerifier")
+  auditEntries          AuditTrail[]
+
+  @@index([departmentId])
+  @@index([email])
+  @@index([isActive])
+}
+
+model UserRole {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  roleId       String    @db.Uuid
+  assignedAt   DateTime  @default(now())
+  assignedById String?   @db.Uuid
+  revokedAt    DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, roleId])
+  @@index([roleId])
+  @@index([userId])
+}
+
+model AssetCategory {
+  id           String        @id @default(uuid()) @db.Uuid
+  code         String        @unique
+  name         String        @unique
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  assets       Asset[]
+  srvLineItems SRVLineItem[]
+
+  @@index([name])
+}
+
+model Asset {
+  id                  String               @id @default(uuid()) @db.Uuid
+  painCode            String               @unique
+  serialNumber        String?
+  name                String
+  description         String?
+  assetCategoryId     String               @db.Uuid
+  departmentId        String               @db.Uuid
+  location            String?
+  acquisitionDate     DateTime             @db.Date
+  historicalCost      Decimal              @db.Decimal(18, 2)
+  salvageValue        Decimal              @db.Decimal(18, 2)
+  currentNetBookValue Decimal              @db.Decimal(18, 2)
+  usefulLifeYears     Int?
+  assetType           String
+  isDepreciable       Boolean              @default(true)
+  inServiceDate       DateTime?             @db.Date
+  status              AssetLifecycleStatus @default(PENDING_INSCRIPTION)
+  custodianName       String?
+  srvVoucherId        String?              @db.Uuid
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+
+  assetCategory AssetCategory @relation(fields: [assetCategoryId], references: [id], onDelete: Restrict)
+  department    Department    @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  srvVoucher    SRVVoucher?   @relation(fields: [srvVoucherId], references: [id], onDelete: Restrict)
+
+  custodyTransfers      CustodyTransfer[]
+  maintenanceRecords    MaintenanceRecord[]
+  capitalAdditions      CapitalAddition[]
+  insurancePolicies     InsurancePolicy[]
+  depreciationLedger    DepreciationLedger[]
+  surveyItems           SurveyItem[]
+  sivVoucher            SIVVoucher?
+  physicalVerifications PhysicalVerification[]
+  disposals             DisposalRecord[]
+
+  @@index([painCode])
+  @@index([serialNumber])
+  @@index([assetCategoryId])
+  @@index([departmentId])
+  @@index([status])
+  @@index([acquisitionDate])
+  @@index([srvVoucherId])
+}
+
+model SRVVoucher {
+  id                  String        @id @default(uuid()) @db.Uuid
+  voucherNumber       String        @unique
+  departmentId        String        @db.Uuid
+  creatorId           String        @db.Uuid
+  approverId          String?       @db.Uuid
+  status              VoucherStatus @default(DRAFT)
+  purchaseOrderNumber String?
+  invoiceNumber       String?
+  vendorName          String?
+  receivedDate        DateTime      @db.Date
+  approvedAt          DateTime?
+  lockedAt            DateTime?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  department Department    @relation("SrvDepartment", fields: [departmentId], references: [id], onDelete: Restrict)
+  creator    User          @relation("SrvCreator", fields: [creatorId], references: [id], onDelete: Restrict)
+  approver   User?         @relation("SrvApprover", fields: [approverId], references: [id], onDelete: Restrict)
+  lineItems  SRVLineItem[]
+  assets     Asset[]
+
+  @@index([voucherNumber])
+  @@index([departmentId])
+  @@index([creatorId])
+  @@index([approverId])
+  @@index([status])
+  @@index([receivedDate])
+}
+
+model SRVLineItem {
+  id              String   @id @default(uuid()) @db.Uuid
+  srvVoucherId    String   @db.Uuid
+  description     String
+  quantity        Int
+  unitCost        Decimal  @db.Decimal(18, 2)
+  totalCost       Decimal  @db.Decimal(18, 2)
+  serialNumber    String?
+  assetCategoryId String?  @db.Uuid
+  assetType       String?
+  usefulLifeYears Int?
+  isDepreciable   Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  srvVoucher    SRVVoucher     @relation(fields: [srvVoucherId], references: [id], onDelete: Cascade)
+  assetCategory AssetCategory? @relation(fields: [assetCategoryId], references: [id], onDelete: Restrict)
+
+  @@index([srvVoucherId])
+  @@index([serialNumber])
+  @@index([assetCategoryId])
+}
+
+model SIVVoucher {
+  id                 String        @id @default(uuid()) @db.Uuid
+  voucherNumber      String        @unique
+  assetId            String        @unique @db.Uuid
+  sourceDepartmentId String        @db.Uuid
+  targetDepartmentId String        @db.Uuid
+  creatorId          String        @db.Uuid
+  approverId         String?       @db.Uuid
+  receiptCustodianId String?       @db.Uuid
+  status             VoucherStatus @default(DRAFT)
+  issueDate          DateTime?     @db.Date
+  approvedAt         DateTime?
+  receiptConfirmedAt DateTime?
+  receiptSignature   String?
+  lockedAt           DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  asset            Asset      @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  sourceDepartment Department @relation("SivSourceDepartment", fields: [sourceDepartmentId], references: [id], onDelete: Restrict)
+  targetDepartment Department @relation("SivTargetDepartment", fields: [targetDepartmentId], references: [id], onDelete: Restrict)
+  creator          User       @relation("SivCreator", fields: [creatorId], references: [id], onDelete: Restrict)
+  approver         User?      @relation("SivApprover", fields: [approverId], references: [id], onDelete: Restrict)
+  receiptCustodian User?      @relation("SivReceiptCustodian", fields: [receiptCustodianId], references: [id], onDelete: Restrict)
+
+  @@index([voucherNumber])
+  @@index([assetId])
+  @@index([sourceDepartmentId])
+  @@index([targetDepartmentId])
+  @@index([creatorId])
+  @@index([approverId])
+  @@index([status])
+}
+
+model CustodyTransfer {
+  id               String         @id @default(uuid()) @db.Uuid
+  assetId          String         @db.Uuid
+  fromDepartmentId String?        @db.Uuid
+  toDepartmentId   String?        @db.Uuid
+  fromLocation     String?
+  toLocation       String?
+  actorId          String         @db.Uuid
+  approverId       String?        @db.Uuid
+  status           TransferStatus @default(PENDING)
+  reason           String?
+  transferredAt    DateTime?
+  approvedAt       DateTime?
+  immutable        Boolean        @default(false)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  asset          Asset       @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  actor          User        @relation("TransferActor", fields: [actorId], references: [id], onDelete: Restrict)
+  approver       User?       @relation("TransferApprover", fields: [approverId], references: [id], onDelete: Restrict)
+  fromDepartment Department? @relation("CustodyFromDepartment", fields: [fromDepartmentId], references: [id], onDelete: Restrict)
+  toDepartment   Department? @relation("CustodyToDepartment", fields: [toDepartmentId], references: [id], onDelete: Restrict)
+
+  @@index([assetId])
+  @@index([actorId])
+  @@index([approverId])
+  @@index([fromDepartmentId])
+  @@index([toDepartmentId])
+  @@index([status])
+  @@index([transferredAt])
+}
+
+model MaintenanceRecord {
+  id                String   @id @default(uuid()) @db.Uuid
+  assetId           String   @db.Uuid
+  recordedById      String   @db.Uuid
+  serviceDate       DateTime @db.Date
+  description       String
+  partsReplaced     String?
+  expenditure       Decimal  @db.Decimal(18, 2)
+  isCapitalAddition Boolean  @default(false)
+  status            String
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  asset            Asset             @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  recordedBy       User              @relation("MaintenanceRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+  capitalAdditions CapitalAddition[]
+
+  @@index([assetId])
+  @@index([recordedById])
+  @@index([serviceDate])
+  @@index([isCapitalAddition])
+}
+
+model CapitalAddition {
+  id            String                @id @default(uuid()) @db.Uuid
+  assetId       String                @db.Uuid
+  maintenanceId String?               @db.Uuid
+  recordedById  String                @db.Uuid
+  amount        Decimal               @db.Decimal(18, 2)
+  description   String
+  approvedById  String?               @db.Uuid
+  approvedAt    DateTime?
+  status        AuthorizationDecision @default(PENDING)
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
+
+  asset       Asset              @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  recordedBy  User               @relation("CapitalAdditionRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+  approvedBy  User?              @relation("CapitalAdditionApprover", fields: [approvedById], references: [id], onDelete: Restrict)
+  maintenance MaintenanceRecord? @relation(fields: [maintenanceId], references: [id], onDelete: Restrict)
+
+  @@index([assetId])
+  @@index([maintenanceId])
+  @@index([recordedById])
+  @@index([status])
+}
+
+model InsurancePolicy {
+  id             String   @id @default(uuid()) @db.Uuid
+  policyNumber   String   @unique
+  assetId        String   @db.Uuid
+  underwriter    String
+  coverageScope  String
+  coverageAmount Decimal  @db.Decimal(18, 2)
+  effectiveDate  DateTime @db.Date
+  expiryDate     DateTime @db.Date
+  createdById    String   @db.Uuid
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  asset     Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  createdBy User  @relation("InsuranceCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([policyNumber])
+  @@index([assetId])
+  @@index([expiryDate])
+  @@index([createdById])
+}
+
+model DepreciationLedger {
+  id                 String   @id @default(uuid()) @db.Uuid
+  assetId            String   @db.Uuid
+  fiscalYear         Int
+  periodLabel        String?
+  openingNBV         Decimal  @db.Decimal(18, 2)
+  depreciationAmount Decimal  @db.Decimal(18, 2)
+  endingNBV          Decimal  @db.Decimal(18, 2)
+  processedById      String   @db.Uuid
+  processedAt        DateTime @default(now())
+  createdAt          DateTime @default(now())
+
+  asset       Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  processedBy User  @relation("DepreciationProcessor", fields: [processedById], references: [id], onDelete: Restrict)
+
+  @@unique([assetId, fiscalYear, periodLabel])
+  @@index([assetId])
+  @@index([fiscalYear])
+  @@index([processedById])
+  @@index([processedAt])
+}
+
+model SurveyDocket {
+  id           String       @id @default(uuid()) @db.Uuid
+  docketNumber String       @unique
+  status       SurveyStatus @default(DRAFT)
+  createdById  String       @db.Uuid
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  createdBy User         @relation("SurveyCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  items     SurveyItem[]
+
+  @@index([docketNumber])
+  @@index([status])
+  @@index([createdById])
+}
+
+model SurveyItem {
+  id             String            @id @default(uuid()) @db.Uuid
+  docketId       String            @db.Uuid
+  assetId        String            @db.Uuid
+  assessedById   String?           @db.Uuid
+  conditionNotes String?
+  rating         SurveyItemRating?
+  reserveValue   Decimal           @default(0) @db.Decimal(18, 2)
+  assessedAt     DateTime?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  docket                SurveyDocket           @relation(fields: [docketId], references: [id], onDelete: Cascade)
+  asset                 Asset                  @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  assessedBy            User?                  @relation("SurveyAssessor", fields: [assessedById], references: [id], onDelete: Restrict)
+  writeOffAuthorization WriteOffAuthorization?
+
+  @@unique([docketId, assetId])
+  @@index([docketId])
+  @@index([assetId])
+  @@index([assessedById])
+}
+
+model WriteOffAuthorization {
+  id               String                @id @default(uuid()) @db.Uuid
+  surveyItemId     String                @unique @db.Uuid
+  bursarApproverId String?               @db.Uuid
+  bursarDecision   AuthorizationDecision @default(PENDING)
+  bursarDecidedAt  DateTime?
+  vcApproverId     String?               @db.Uuid
+  vcDecision       AuthorizationDecision @default(PENDING)
+  vcDecidedAt      DateTime?
+  status           AuthorizationDecision @default(PENDING)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  bursarApprover         User?      @relation("BursarApprover", fields: [bursarApproverId], references: [id], onDelete: Restrict)
+  viceChancellorApprover User?      @relation("ViceChancellorApprover", fields: [vcApproverId], references: [id], onDelete: Restrict)
+  surveyItem             SurveyItem @relation(fields: [surveyItemId], references: [id], onDelete: Restrict)
+
+  @@index([bursarApproverId])
+  @@index([vcApproverId])
+  @@index([status])
+}
+
+model DisposalRecord {
+  id               String   @id @default(uuid()) @db.Uuid
+  assetId          String   @db.Uuid
+  recordedById     String   @db.Uuid
+  auctionReference String?
+  proceeds         Decimal  @db.Decimal(18, 2)
+  netBookValue     Decimal  @db.Decimal(18, 2)
+  gainOrLoss       Decimal  @db.Decimal(18, 2)
+  disposedAt       DateTime @db.Date
+  createdAt        DateTime @default(now())
+
+  asset      Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  recordedBy User  @relation("DisposalRecorder", fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@unique([assetId])
+  @@index([assetId])
+  @@index([recordedById])
+  @@index([disposedAt])
+}
+
+model PhysicalVerification {
+  id               String              @id @default(uuid()) @db.Uuid
+  assetId          String              @db.Uuid
+  verifierId       String              @db.Uuid
+  observedLocation String?
+  outcome          VerificationOutcome
+  findings         String?
+  verifiedAt       DateTime            @default(now())
+  createdAt        DateTime            @default(now())
+
+  asset    Asset @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  verifier User  @relation("PhysicalVerifier", fields: [verifierId], references: [id], onDelete: Restrict)
+
+  @@index([assetId])
+  @@index([verifierId])
+  @@index([verifiedAt])
+  @@index([outcome])
+}
+
+model IdentifierCounter {
+  id           String   @id @default(uuid()) @db.Uuid
+  prefix       String
+  year         Int
+  unitCode     String?
+  categoryCode String?
+  sequence     Int
+  updatedAt    DateTime @updatedAt
+
+  @@unique([prefix, year, unitCode, categoryCode])
+  @@index([prefix, year])
+  @@index([unitCode, categoryCode, year])
+}
+
+model AuditTrail {
+  id         String          @id @default(uuid()) @db.Uuid
+  timestamp  DateTime        @default(now())
+  userId     String?         @db.Uuid
+  ipAddress  String?
+  actionType AuditActionType
+  entityName String
+  entityId   String
+  delta      Json?
+  prevHash   String?
+  rowHash    String
+  createdAt  DateTime        @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([timestamp])
+  @@index([userId])
+  @@index([actionType])
+  @@index([entityName])
+  @@index([entityId])
+  @@index([prevHash])
+}

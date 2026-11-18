@@ -1,0 +1,25 @@
+const express = require("express")
+const { authenticate } = require("../../../middleware/auth")
+const { requirePermissions, requireRoles } = require("../../../middleware/authorize")
+const { validateBody } = require("../../../middleware/validate")
+const HttpError = require("../../../utils/httpError")
+const service = require("../services/depreciationService")
+const { runBatchSchema, configureAssetSchema, ledgerQuerySchema } = require("../validation/schemas")
+
+const router = express.Router()
+const run = (handler, status = 200) => (req, res, next) => Promise.resolve(handler(req)).then((data) => res.status(status).json({ success: true, data })).catch(next)
+router.use(authenticate)
+router.get("/assets/:assetId/history", requirePermissions("assets.read"), run((req) => service.listAssetHistory(req.params.assetId)))
+router.patch("/assets/:assetId/config", requireRoles("BURSARY_ASSET_ACCOUNTANT"), requirePermissions("depreciation.configure"), validateBody(configureAssetSchema), run((req) => service.configureAsset(req.params.assetId, req.body, req.user, req.ip)))
+router.get("/ledger", requirePermissions("assets.read"), (req, res, next) => {
+  const result = ledgerQuerySchema.safeParse(req.query)
+  if (!result.success) return next(new HttpError(400, "Invalid depreciation query", result.error.issues))
+  return Promise.resolve(service.listLedger(result.data)).then((data) => res.status(200).json({ success: true, data })).catch(next)
+})
+router.get("/batches", requirePermissions("assets.read"), (req, res, next) => {
+  const result = ledgerQuerySchema.pick({ fiscalYear: true, page: true, pageSize: true }).safeParse(req.query)
+  if (!result.success) return next(new HttpError(400, "Invalid batch query", result.error.issues))
+  return Promise.resolve(service.listBatches(result.data)).then((data) => res.status(200).json({ success: true, data })).catch(next)
+})
+router.post("/batches", requireRoles("BURSARY_ASSET_ACCOUNTANT"), requirePermissions("depreciation.run"), validateBody(runBatchSchema), run((req) => service.runBatch(req.body.period, req.user, req.ip), 201))
+module.exports = router

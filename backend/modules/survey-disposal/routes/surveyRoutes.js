@@ -1,0 +1,32 @@
+const express = require("express")
+const { authenticate } = require("../../../middleware/auth")
+const { requirePermissions, requireRoles } = require("../../../middleware/authorize")
+const { validateBody } = require("../../../middleware/validate")
+const HttpError = require("../../../utils/httpError")
+const service = require("../services/surveyDisposalService")
+const { listSchema, addItemSchema, assessSchema } = require("../validation/schemas")
+
+const router = express.Router()
+const run = (handler, status = 200) => (req, res, next) => Promise.resolve(handler(req)).then((data) => res.status(status).json({ success: true, data })).catch(next)
+router.use(authenticate)
+router.get("/dockets", requirePermissions("assets.read"), (req, res, next) => {
+  const result = listSchema.safeParse(req.query)
+  if (!result.success) return next(new HttpError(400, "Invalid survey query", result.error.issues))
+  return Promise.resolve(service.listDockets(result.data)).then((data) => res.status(200).json({ success: true, data })).catch(next)
+})
+router.post("/dockets", requireRoles("BOARD_OF_SURVEY_MEMBER"), requirePermissions("survey.compile"), run((req) => service.createDocket(req.user, req.ip), 201))
+router.get("/dockets/:id", requirePermissions("assets.read"), run((req) => service.getDocket(req.params.id)))
+router.get("/items/:id/authorization", requirePermissions("assets.read"), run((req) => service.getWriteOffAuthorization(req.params.id)))
+router.post("/dockets/:id/items", requireRoles("BOARD_OF_SURVEY_MEMBER"), requirePermissions("survey.compile"), validateBody(addItemSchema), run((req) => service.addSurveyItem(req.params.id, req.body.assetId, req.user, req.ip), 201))
+router.post("/items/:id/assessment", requireRoles("BOARD_OF_SURVEY_MEMBER"), requirePermissions("survey.rate", "survey.reserve_value"), validateBody(assessSchema), run((req) => service.assessSurveyItem(req.params.id, req.body, req.user, req.ip)))
+router.post("/items/:id/approvals/bursar", requireRoles("BURSAR"), requirePermissions("writeoff.bursar.approve"), (req, res, next) => {
+  const result = require("zod").z.object({ decision: require("zod").z.enum(["APPROVED", "REJECTED"]) }).safeParse(req.body)
+  if (!result.success) return next(new HttpError(400, "A valid decision is required", result.error.issues))
+  return run((r) => service.decideWriteOff(r.params.id, { role: "BURSAR", value: result.data.decision }, r.user, r.ip))(req, res, next)
+})
+router.post("/items/:id/approvals/vice-chancellor", requireRoles("VICE_CHANCELLOR"), requirePermissions("writeoff.vc.approve"), (req, res, next) => {
+  const result = require("zod").z.object({ decision: require("zod").z.enum(["APPROVED", "REJECTED"]) }).safeParse(req.body)
+  if (!result.success) return next(new HttpError(400, "A valid decision is required", result.error.issues))
+  return run((r) => service.decideWriteOff(r.params.id, { role: "VICE_CHANCELLOR", value: result.data.decision }, r.user, r.ip))(req, res, next)
+})
+module.exports = router

@@ -1,0 +1,11 @@
+const { z } = require("zod")
+const { SurveyItemRating, VerificationOutcome } = require("@prisma/client")
+const page = { page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(100).default(20) }
+const listSchema = z.object({ ...page, status: z.enum(["DRAFT", "UNDER_SURVEY", "PENDING_APPROVAL", "WRITTEN_OFF", "REJECTED", "DISPOSED"]).optional() })
+const addItemSchema = z.object({ assetId: z.string().uuid() })
+const assessSchema = z.object({ rating: z.nativeEnum(SurveyItemRating), conditionNotes: z.string().trim().max(3000).optional().nullable(), reserveValue: z.coerce.number().finite().min(0).max(9999999999999999) })
+const disposalSchema = z.object({ assetId: z.string().uuid(), auctionReference: z.string().trim().max(200).optional().nullable(), proceeds: z.coerce.number().finite().min(0).max(9999999999999999), disposedAt: z.coerce.date() })
+const listDisposalSchema = z.object({ ...page, assetId: z.string().uuid().optional() })
+const verificationSchema = z.object({ assetId: z.string().uuid(), observedLocation: z.string().trim().max(300).optional().nullable(), outcome: z.nativeEnum(VerificationOutcome), findings: z.string().trim().max(3000).optional().nullable(), verifiedAt: z.coerce.date().optional() })
+const listVerificationSchema = z.object({ ...page, assetId: z.string().uuid().optional(), outcome: z.nativeEnum(VerificationOutcome).optional() })
+module.exports = { listSchema, addItemSchema, assessSchema, disposalSchema, listDisposalSchema, verificationSchema, listVerificationSchema }
