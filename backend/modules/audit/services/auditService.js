@@ -68,48 +68,69 @@ async function recordAudit({
     throw new Error("Audit entityName and entityId are required")
   }
 
-  const safeDelta = sanitizeDelta(delta)
-
   try {
-    return await prisma.$transaction(async (transaction) => {
-      await transaction.$executeRaw`SELECT pg_advisory_xact_lock(${AUDIT_ADVISORY_LOCK_KEY})`
-
-      const previous = await transaction.auditTrail.findFirst({
-        orderBy: [{ timestamp: "desc" }, { id: "desc" }],
-        select: { rowHash: true, timestamp: true },
-      })
-
-      const requestedTimestamp = timestamp instanceof Date ? timestamp : new Date()
-      // PostgreSQL now() is fixed at transaction start. A transaction can wait
-      // for the chain lock and then commit with a createdAt earlier than the
-      // entry it chained from. Keep the explicit chain timestamp monotonic.
-      const entryTimestamp = previous && requestedTimestamp <= previous.timestamp
-        ? new Date(previous.timestamp.getTime() + 1)
-        : requestedTimestamp
-      const entry = {
-        timestamp: entryTimestamp,
+    return await prisma.$transaction(
+      (transaction) => appendAuditInTransaction(transaction, {
         userId,
         ipAddress,
         actionType,
         entityName,
         entityId,
-        delta: safeDelta,
-        prevHash: previous?.rowHash || null,
-      }
-      const rowHash = computeRowHash(entry)
-
-      return await transaction.auditTrail.create({
-        data: { ...entry, rowHash },
-      })
-    // The advisory lock orders audit writers. ReadCommitted ensures a writer
-    // waiting on it sees the latest committed hash-chain tail.
-    }, { isolationLevel: "ReadCommitted", timeout: 10000 })
+        delta,
+        timestamp,
+      }),
+      { isolationLevel: "ReadCommitted", timeout: 10000 },
+    )
   } catch (error) {
     if (process.env.NODE_ENV !== "test") {
       console.error("Audit recording failed:", error.message)
     }
     return null
   }
+}
+
+async function appendAuditInTransaction(transaction, {
+  userId = null,
+  ipAddress = null,
+  actionType = "OTHER",
+  entityName,
+  entityId,
+  delta = null,
+  timestamp = null,
+}) {
+  if (!entityName || !entityId) {
+    throw new Error("Audit entityName and entityId are required")
+  }
+
+  const safeDelta = sanitizeDelta(delta)
+
+  await transaction.$executeRaw`SELECT pg_advisory_xact_lock(${AUDIT_ADVISORY_LOCK_KEY})`
+
+  const previous = await transaction.auditTrail.findFirst({
+    orderBy: [{ timestamp: "desc" }, { id: "desc" }],
+    select: { rowHash: true, timestamp: true },
+  })
+
+  const requestedTimestamp = timestamp instanceof Date ? timestamp : new Date()
+  // PostgreSQL now() is fixed at transaction start. A transaction can wait
+  // for the chain lock and then commit with a createdAt earlier than the
+  // entry it chained from. Keep the explicit chain timestamp monotonic.
+  const entryTimestamp = previous && requestedTimestamp <= previous.timestamp
+    ? new Date(previous.timestamp.getTime() + 1)
+    : requestedTimestamp
+  const entry = {
+    timestamp: entryTimestamp,
+    userId,
+    ipAddress,
+    actionType,
+    entityName,
+    entityId,
+    delta: safeDelta,
+    prevHash: previous?.rowHash || null,
+  }
+  const rowHash = computeRowHash(entry)
+
+  return transaction.auditTrail.create({ data: { ...entry, rowHash } })
 }
 
 async function verifyAuditChain() {
@@ -164,6 +185,7 @@ async function verifyAuditChain() {
 
 module.exports = {
   recordAudit,
+  appendAuditInTransaction,
   verifyAuditChain,
   computeRowHash,
   sanitizeDelta,

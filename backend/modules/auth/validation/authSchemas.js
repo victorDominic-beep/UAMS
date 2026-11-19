@@ -13,4 +13,11 @@ const changePasswordSchema = z.object({
   path: ["newPassword"],
 })
 
-module.exports = { loginSchema, changePasswordSchema }
+const bootstrapAdministratorSchema = z.object({
+  staffNumber: z.string().trim().min(3).max(50),
+  email: z.string().trim().email().max(254),
+  fullName: z.string().trim().min(2).max(150),
+  password: z.string().min(12).max(128).regex(/[A-Z]/).regex(/[a-z]/).regex(/[0-9]/).regex(/[^A-Za-z0-9]/),
+}).strict()
+
+module.exports = { loginSchema, changePasswordSchema, bootstrapAdministratorSchema }

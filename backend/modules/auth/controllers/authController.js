@@ -50,4 +50,17 @@ async function changePassword(req, res, next) {
   }
 }
 
-module.exports = { login, logout, me, changePassword }
+async function bootstrapAdministrator(req, res, next) {
+  try {
+    const user = await authService.bootstrapInitialAdministrator({
+      ...req.body,
+      secret: req.get("x-uams-bootstrap-secret"),
+      ipAddress: req.ip,
+    })
+    res.status(201).json({ success: true, data: { user } })
+  } catch (error) {
+    next(error)
+  }
+}
+
+module.exports = { login, logout, me, changePassword, bootstrapAdministrator }

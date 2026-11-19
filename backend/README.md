@@ -26,6 +26,8 @@ The frontend preview defaults to `http://localhost:8443`; configure `FRONTEND_UR
 | `JWT_SECRET` | Yes | Private signing secret, at least 32 characters. |
 | `JWT_EXPIRES_IN` | No | JWT lifetime; defaults to `8h`. |
 | `FRONTEND_URL` | Yes | Single allowed browser origin for CORS. |
+| `UAMS_ADMIN_BOOTSTRAP_SECRET` | Temporary, optional | Private 32+ character secret that enables the one-time initial administrator endpoint. Remove it after successful provisioning. |
+| `UAMS_PRESENTATION_DATABASE_NAME` | Required while bootstrap secret is set | Exact database name; must begin with `uams_presentation` and match PostgreSQL's reported database name. Bootstrap only permits the `public` schema. |
 | `VITE_UAMS_API_URL` | Frontend | API base URL including `/api`. |
 | `UAMS_TEST_DATABASE_SCHEMA` | Integration tests | Exact isolated disposable schema `uams_phase_test_YYYYMMDD_8hex`; must match the `DATABASE_URL` schema parameter. |
 | `UAMS_DEMO_DATABASE_SCHEMA` | Demo seed | Dedicated local schema name beginning `uams_demo_`; must match the `DATABASE_URL` schema parameter. |
@@ -35,6 +37,8 @@ The frontend preview defaults to `http://localhost:8443`; configure `FRONTEND_UR
 ## Authentication and roles
 
 Login is `POST /api/auth/login` with `staffNumber` and `password`. Send the returned bearer token as `Authorization: Bearer <token>`. `GET /api/auth/me` returns the authenticated user and roles. Login is rate limited. Passwords are bcrypt-hashed. Role checks are enforced by the API; frontend navigation is not an authorization boundary.
+
+For a new hosted presentation database, the explicitly invoked `POST /api/auth/bootstrap/administrator` endpoint creates the first System Administrator only when `NODE_ENV=production`, `UAMS_ADMIN_BOOTSTRAP_SECRET` is configured, the actual database is the configured `uams_presentation*` database in the `public` schema, and no administrator role assignment exists. Send the secret in the `x-uams-bootstrap-secret` header and the administrator fields in the JSON body over HTTPS. The endpoint creates all nine official role records, three `DEMO*` departments, the `DEMOEQ` category, the administrator, and its hash-chained audit entry atomically; it returns no bearer token. It rate limits attempts and cannot be used again after an administrator assignment has been created, including if that assignment is later revoked. Remove the bootstrap secret from Render immediately after success. Never use this endpoint against an existing University database.
 
 The nine operational roles are `SYSTEM_ADMINISTRATOR`, `STORE_OFFICER`, `WORKS_INSPECTION_OFFICER`, `DEPARTMENTAL_CUSTODIAN`, `BURSARY_ASSET_ACCOUNTANT`, `BURSAR`, `VICE_CHANCELLOR`, `BOARD_OF_SURVEY_MEMBER`, and `INTERNAL_AUDITOR`. The System Administrator manages user accounts and roles but has no financial operational privileges. The Internal Auditor can inspect assets and audit records and record physical verification; this role has no operational asset mutation privileges. Approvals that require separation of duties are checked against the authenticated user ID as well as role.
 
@@ -56,6 +60,7 @@ All routes below are under `/api`. Unless marked public, they require a bearer t
 | Method and path | Permission / role | Purpose |
 |---|---|---|
 | `GET /health` | Public | API and database health. |
+| `POST /auth/bootstrap/administrator` | Public during one-time setup; requires temporary bootstrap secret and exact presentation database identity | Create the initial System Administrator, all official roles, and presentation reference records; unavailable once any System Administrator assignment exists. |
 | `POST /auth/login` | Public; rate limited | Authenticate with staff number and password. |
 | `GET /auth/me`, `POST /auth/logout`, `POST /auth/change-password` | Authenticated | Current user, logout, password update. |
 | `GET/POST /users`, `GET/PATCH /users/:id`, `PATCH /users/:id/roles`, `PATCH /users/:id/status` | System Administrator | User and role administration. |

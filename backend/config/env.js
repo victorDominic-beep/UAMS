@@ -12,6 +12,8 @@ const envSchema = z
     JWT_SECRET: z.string().min(32, "JWT_SECRET must be at least 32 characters"),
     JWT_EXPIRES_IN: z.string().min(1, "JWT_EXPIRES_IN is required").default("8h"),
     FRONTEND_URL: z.string().url("FRONTEND_URL must be a valid URL"),
+    UAMS_ADMIN_BOOTSTRAP_SECRET: z.string().optional(),
+    UAMS_PRESENTATION_DATABASE_NAME: z.string().optional(),
   })
   .superRefine((value, ctx) => {
     if (value.NODE_ENV === "production") {
@@ -21,6 +23,30 @@ const envSchema = z
           code: z.ZodIssueCode.custom,
           path: ["JWT_SECRET"],
           message: "JWT_SECRET must not contain a development placeholder in production",
+        })
+      }
+    }
+
+    if (value.UAMS_ADMIN_BOOTSTRAP_SECRET) {
+      if (value.UAMS_ADMIN_BOOTSTRAP_SECRET.length < 32) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["UAMS_ADMIN_BOOTSTRAP_SECRET"],
+          message: "UAMS_ADMIN_BOOTSTRAP_SECRET must be at least 32 characters",
+        })
+      }
+      if (value.UAMS_ADMIN_BOOTSTRAP_SECRET === value.JWT_SECRET) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["UAMS_ADMIN_BOOTSTRAP_SECRET"],
+          message: "UAMS_ADMIN_BOOTSTRAP_SECRET must differ from JWT_SECRET",
+        })
+      }
+      if (!/^uams_presentation(?:_[a-z0-9_]+)?$/i.test(value.UAMS_PRESENTATION_DATABASE_NAME || "")) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["UAMS_PRESENTATION_DATABASE_NAME"],
+          message: "Set UAMS_PRESENTATION_DATABASE_NAME to the dedicated uams_presentation database name",
         })
       }
     }
